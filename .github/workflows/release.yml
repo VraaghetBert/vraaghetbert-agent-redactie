@@ -1,0 +1,43 @@
+name: Release plugin
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versie uitlezen
+        id: versie
+        run: |
+          VERSIE=$(grep -m1 -E '^\s*\*\s*Version:' agent-redactie.php | sed -E 's/.*Version:\s*//' | tr -d '[:space:]')
+          echo "versie=$VERSIE" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VERSIE" >/dev/null 2>&1; then
+            echo "bestaat=ja" >> "$GITHUB_OUTPUT"
+          else
+            echo "bestaat=nee" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Zip maken
+        if: steps.versie.outputs.bestaat == 'nee'
+        run: |
+          mkdir -p "/tmp/bouw/${{ github.event.repository.name }}"
+          rsync -a --exclude '.git' --exclude '.github' --exclude '.gitignore' ./ "/tmp/bouw/${{ github.event.repository.name }}/"
+          cd /tmp/bouw && zip -rq "${{ github.event.repository.name }}.zip" "${{ github.event.repository.name }}"
+
+      - name: Release maken
+        if: steps.versie.outputs.bestaat == 'nee'
+        run: |
+          NOTITIES=$(awk -v v="## ${{ steps.versie.outputs.versie }}" '$0==v{f=1;next} /^## /{f=0} f' CHANGELOG.md)
+          gh release create "v${{ steps.versie.outputs.versie }}" /tmp/bouw/${{ github.event.repository.name }}.zip \
+            --title "v${{ steps.versie.outputs.versie }}" --notes "${NOTITIES:-Nieuwe versie}"
+        env:
+          GH_TOKEN: ${{ github.token }}
